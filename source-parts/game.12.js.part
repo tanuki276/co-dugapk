@@ -1,0 +1,200 @@
+      sharedDepth.textContent = `${Number(j.depth).toLocaleString()}m ✓`;
+      sharedPoints.textContent = `${Number(j.points).toLocaleString()} ✓`;
+    } catch {
+      sharedDepth.textContent = "INVALID";
+      sharedPoints.textContent = "TAMPERED";
+      showToast("共有結果の署名が無効");
+    }
+  }
+  function closeShared() {
+    sharedOverlay.classList.add("hidden");
+    const u = new URL(location.href);
+    u.searchParams.delete("r");
+    u.searchParams.delete("r2");
+    u.searchParams.delete("result");
+    window.history.replaceState({}, "", u);
+    if (started && !gameover) paused = false;
+  }
+  sharedClose.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeShared();
+  });
+  challengeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeShared();
+    intro.classList.add("hidden");
+    resetRun();
+    started = true;
+    paused = false;
+  });
+  sharedOverlay.addEventListener("pointerdown", (e) => {
+    if (e.target === sharedOverlay) closeShared();
+  });
+  totalPointsEl.textContent = Math.floor(totalPoints).toLocaleString();
+  checkShared();
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const panels = [...document.querySelectorAll(".overlay:not(.hidden)")].sort(
+      (a, b) =>
+        Number(getComputedStyle(b).zIndex) - Number(getComputedStyle(a).zIndex),
+    );
+    const panel = panels[0];
+    if (!panel) return;
+    const controls = [
+      ...panel.querySelectorAll(
+        'button:not(:disabled),input,select,[tabindex="0"]',
+      ),
+    ].filter((el) => !el.hidden);
+    if (!controls.length) return;
+    const first = controls[0],
+      last = controls.at(-1);
+    if (
+      e.shiftKey &&
+      (!panel.contains(document.activeElement) ||
+        document.activeElement === first)
+    ) {
+      e.preventDefault();
+      last.focus();
+    } else if (
+      !e.shiftKey &&
+      (!panel.contains(document.activeElement) ||
+        document.activeElement === last)
+    ) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+  canvas.tabIndex = 0;
+  canvas.setAttribute("aria-label", "CO-DUG 掘削フィールド");
+  // Overlay state is the single authority: closing one menu cannot resume behind another.
+  function syncPause() {
+    paused =
+      sessionStarting ||
+      manualPause ||
+      !started ||
+      gameover ||
+      !!document.querySelector(".overlay:not(.hidden)");
+    document.body.classList.toggle("playing", !paused);
+  }
+  function togglePause() {
+    if (!started || gameover) return;
+    manualPause = !manualPause;
+    $("pauseOverlay").classList.toggle("hidden", !manualPause);
+    syncPause();
+  }
+  $("pauseBtn").onclick = togglePause;
+  $("resumeBtn").onclick = () => {
+    manualPause = false;
+    $("pauseOverlay").classList.add("hidden");
+    syncPause();
+    canvas.focus();
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && started && !gameover) {
+      manualPause = true;
+      $("pauseOverlay").classList.remove("hidden");
+      syncPause();
+    }
+  });
+  for (const [id, fn] of [
+    [
+      "leftControl",
+      () => {
+        moveLane(currentLane - 1);
+      },
+    ],
+    [
+      "rightControl",
+      () => {
+        moveLane(currentLane + 1);
+      },
+    ],
+    ["drillControl", activateDrill],
+  ]) {
+    $(id).onclick = () => {
+      syncPause();
+      if (!paused) {
+        fn();
+        canvas.focus();
+      }
+    };
+  }
+  $("pilotName").value = storage.getItem("codug-name") || "採掘者";
+  $("personalBest").textContent =
+    `PERSONAL BEST / ${bestDepth.toLocaleString()}m · ${bestPoints.toLocaleString()}pt`;
+  $("introGarage").onclick = openGarage;
+  $("submitRetry").onclick = () => {
+    if (lastResult) sealResult(lastResult);
+  };
+  $('journalBtn').onclick = () => openJournal();
+  $('introJournal').onclick = () => openJournal();
+  $('introAchievements').onclick = () => openJournal('achievements');
+  $('resultJournal').onclick = () => openJournal('achievements');
+  $('journalClose').onclick = closeJournal;
+  $('journalTab').onchange = renderJournal;
+  $('journalFilter').onchange = renderJournal;
+  $('journalOverlay').addEventListener('keydown', e => {
+    if (e.code === 'Escape') { e.preventDefault(); e.stopPropagation(); closeJournal(); }
+  });
+  renderRank();
+  refreshProfile();
+  let rankRequest = 0;
+  async function loadRanking() {
+    const request = ++rankRequest;
+    $("rankStatus").textContent = "記録を読み込んでいます…";
+    $("rankList").replaceChildren();
+    try {
+      const query = new URLSearchParams({
+        period: $("rankPeriod").value,
+        sort: $("rankSort").value,
+      });
+      const j = await api(`leaderboard?${query}`);
+      if (request !== rankRequest) return;
+      $("rankStatus").textContent = j.entries.length
+        ? `${j.entries.length} PLAYERS / ${$("rankPeriod").value === "week" ? "直近7日" : "全期間"}`
+        : "まだ記録がありません。最初の採掘者になろう。";
+      j.entries.forEach((r, i) => {
+        const li = document.createElement("li");
+        li.className = "rankRow" + (r.id === lastSavedId ? " mine" : "");
+        for (const [cls, text] of [
+          ["rankNumber", String(i + 1).padStart(2, "0")],
+          ["rankName", r.player_name],
+          ["rankScore", `${r.depth.toLocaleString()}m`],
+          ["rankPoints", `${r.points.toLocaleString()}pt`],
+        ]) {
+          const el = document.createElement("span");
+          el.className = cls;
+          el.textContent = text;
+          li.appendChild(el);
+        }
+        $("rankList").appendChild(li);
+      });
+    } catch (e) {
+      if (request === rankRequest)
+        $("rankStatus").textContent =
+          "ランキングを取得できませんでした。「更新」で再試行できます。";
+    }
+  }
+  function openRanking() {
+    $("rankingOverlay").classList.remove("hidden");
+    syncPause();
+    loadRanking();
+    $("rankingClose").focus();
+  }
+  for (const id of ["rankingBtn", "introRanking", "resultRanking"])
+    $(id).onclick = openRanking;
+  $("rankingClose").onclick = () => {
+    $("rankingOverlay").classList.add("hidden");
+    rankRequest++;
+    syncPause();
+    canvas.focus();
+  };
+  $("rankPeriod").onchange = loadRanking;
+  $("rankSort").onchange = loadRanking;
+  $("rankRefresh").onclick = loadRanking;
+  for (const overlay of document.querySelectorAll(".overlay")) {
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute(
+      "aria-label",
