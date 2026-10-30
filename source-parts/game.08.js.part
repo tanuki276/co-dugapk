@@ -1,0 +1,200 @@
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + (i % 2 ? -34 : 34), y + 24);
+        ctx.lineTo(x + (i % 2 ? -18 : 18), y + 52);
+        ctx.stroke();
+      }
+    } else if (layer.decor === "embers") {
+      ctx.fillStyle = "rgba(255,120,80,.35)";
+      for (let i = 0; i < 20; i++) {
+        const y = (((i * 67 - depth * 5 + t * 20) % H) + H) % H,
+          x = seeded(i + Math.floor(depth)) * W;
+        ctx.fillRect(x, y, 2, 2);
+      }
+    } else if (layer.decor === "crystals") {
+      for (let i = 0; i < 13; i++) {
+        const y = (((i * 87 - depth * 3.7) % H) + H) % H,
+          x = i % 2 ? right + 18 : left - 18;
+        ctx.fillStyle = "rgba(199,140,255,.28)";
+        ctx.beginPath();
+        ctx.moveTo(x, y - 18);
+        ctx.lineTo(x + (i % 2 ? 18 : -18), y);
+        ctx.lineTo(x, y + 18);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else if (layer.decor === "lava") {
+      ctx.strokeStyle = "rgba(255,100,55,.45)";
+      ctx.lineWidth = 5;
+      for (let i = 0; i < 5; i++) {
+        const y = (((i * 155 - depth * 5) % H) + H) % H;
+        ctx.beginPath();
+        ctx.moveTo(i % 2 ? right : left, y);
+        ctx.bezierCurveTo(
+          W / 2,
+          y + 20,
+          W / 2,
+          y + 50,
+          i % 2 ? right : left,
+          y + 80,
+        );
+        ctx.stroke();
+      }
+    } else if (layer.decor === "void") {
+      ctx.fillStyle = "rgba(105,255,242,.35)";
+      for (let i = 0; i < 18; i++) {
+        const y = (((i * 79 - depth * 2.5) % H) + H) % H,
+          x = seeded(i * 17) * W;
+        ctx.fillRect(x, y, 1, 10 + seeded(i) * 20);
+      }
+    } else if (layer.decor === "error") {
+      ctx.fillStyle = "rgba(255,105,229,.22)";
+      for (let i = 0; i < 10; i++) {
+        const y = (((i * 73 - depth * 6) % H) + H) % H;
+        ctx.fillRect(
+          i % 2 ? right : left - (20 + seeded(i) * 55),
+          y,
+          20 + seeded(i + 4) * 65,
+          3,
+        );
+      }
+    }
+    // Deep zones stay on the walls so hazards remain legible in the lanes.
+    if (["ripples", "ice", "bones", "spores", "orbits", "lensing", "bloom"].includes(layer.decor)) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, left, H);
+      ctx.rect(right, 0, W - right, H);
+      ctx.clip();
+      ctx.strokeStyle = layer.vein;
+      ctx.fillStyle = layer.vein;
+      ctx.globalAlpha = 0.38;
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 14; i++) {
+        const x = i % 2 ? right + 22 : left - 22;
+        const y = ((i * 107 - depth * 1.8) % (H + 120) + H + 120) % (H + 120) - 60;
+        const phase = reducedMotion ? 0 : Math.sin(t * 0.6 + i) * 4;
+        ctx.beginPath();
+        if (layer.decor === "ripples") {
+          for (let ring = 0; ring < 3; ring++) {
+            ctx.moveTo(x + 14 + ring * 10, y);
+            ctx.ellipse(x, y, 14 + ring * 10, 7 + ring * 6, 0, 0, Math.PI * 2);
+          }
+        } else if (layer.decor === "ice") {
+          ctx.moveTo(x, y - 36);
+          ctx.lineTo(x + 14, y);
+          ctx.lineTo(x, y + 28);
+          ctx.lineTo(x - 14, y);
+          ctx.closePath();
+          ctx.moveTo(x, y - 36);
+          ctx.lineTo(x, y + 28);
+        } else if (layer.decor === "bones") {
+          ctx.moveTo(x, y - 30);
+          ctx.lineTo(x, y + 30);
+          for (let rib = -2; rib <= 2; rib++) {
+            ctx.moveTo(x - 25, y + rib * 11 + 7);
+            ctx.quadraticCurveTo(x, y + rib * 11 - 10, x + 25, y + rib * 11 + 7);
+          }
+        } else if (layer.decor === "spores") {
+          ctx.moveTo(x, y + 30);
+          ctx.quadraticCurveTo(x + phase, y, x + 10, y - 18);
+          ctx.moveTo(x + 20, y - 18);
+          ctx.arc(x + 10, y - 18, 10, Math.PI, Math.PI * 2);
+          ctx.moveTo(x - 12, y - 30);
+          ctx.arc(x - 15, y - 30, 3, 0, Math.PI * 2);
+        } else if (layer.decor === "orbits") {
+          ctx.ellipse(x, y, 32, 12, i * 0.7, 0, Math.PI * 2);
+          ctx.moveTo(x + 5, y);
+          ctx.arc(x, y, 5, 0, Math.PI * 2);
+        } else if (layer.decor === "lensing") {
+          for (let ring = 0; ring < 4; ring++) {
+            const radius = 8 + ring * 7;
+            ctx.moveTo(x + radius, y);
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+          }
+        } else {
+          for (let petal = 0; petal < 5; petal++) {
+            const angle = petal * Math.PI * 2 / 5;
+            ctx.moveTo(x, y);
+            ctx.quadraticCurveTo(x + Math.cos(angle + 0.5) * 42, y + Math.sin(angle + 0.5) * 42,
+              x + Math.cos(angle) * 28, y + Math.sin(angle) * 28);
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+  function drawBackground(layer) {
+    ctx.fillStyle = layer.sky;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    const f = field(),
+      left = f.left,
+      right = f.left + f.width;
+    ctx.fillStyle = layer.wall;
+    ctx.fillRect(0, 0, left, H);
+    ctx.fillRect(right, 0, W - right, H);
+    for (let side = 0; side < 2; side++)
+      for (let i = 0; i < 30; i++) {
+        const s = i + side * 999 + Math.floor(depth / 35) * 31,
+          y =
+            ((((i * 83 - depth * 4.1) % (H + 100)) + H + 100) % (H + 100)) - 50,
+          x = side ? right + seeded(s) * (W - right) : seeded(s) * left;
+        ctx.globalAlpha = 0.16 + 0.25 * seeded(s + 3);
+        ctx.fillStyle = seeded(s + 5) > 0.72 ? layer.vein : "#060608";
+        ctx.beginPath();
+        ctx.arc(x, y, 3 + seeded(s + 2) * 10, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    ctx.globalAlpha = 1;
+    drawDecor(layer);
+    const grad = ctx.createLinearGradient(left, 0, right, 0);
+    grad.addColorStop(0, "rgba(0,0,0,.58)");
+    grad.addColorStop(0.12, "rgba(0,0,0,.04)");
+    grad.addColorStop(0.88, "rgba(0,0,0,.04)");
+    grad.addColorStop(1, "rgba(0,0,0,.58)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(left, 0, f.width, H);
+    ctx.strokeStyle = "rgba(255,255,255,.065)";
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 3; i++) {
+      const x = left + (f.width * i) / 3;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+  }
+  function drawRock(id, cellW) {
+    const t = TYPES[id];
+    ctx.fillStyle = t.fill;
+    ctx.strokeStyle = t.color;
+    ctx.lineWidth =
+      id === "magmaRock" || id === "voidRock" || id === "errorRock" ? 3 : 2;
+    ctx.beginPath();
+    ctx.moveTo(-cellW * 0.29, -18);
+    ctx.lineTo(-cellW * 0.18, -28);
+    ctx.lineTo(cellW * 0.16, -25);
+    ctx.lineTo(cellW * 0.29, -10);
+    ctx.lineTo(cellW * 0.22, 22);
+    ctx.lineTo(-cellW * 0.17, 27);
+    ctx.lineTo(-cellW * 0.3, 11);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = t.color;
+    ctx.globalAlpha = 0.28;
+    ctx.fillRect(-12, -9, 7, 5);
+    ctx.globalAlpha = 1;
+    if (id === "shale") {
+      ctx.strokeStyle = t.color;
+      ctx.beginPath();
+      ctx.moveTo(-20, 4);
+      ctx.lineTo(19, -5);
+      ctx.stroke();
+    }
+    if (id === "magmaRock" || id === "errorRock") {
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = t.color;
