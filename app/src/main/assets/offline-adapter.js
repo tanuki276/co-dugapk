@@ -57,6 +57,8 @@
         localStorage.setItem("codug-local-last-result", JSON.stringify(result));
         return json(result);
       }
+      // Kept only as a compatibility stub for the original game script.
+      // The leaderboard UI is removed below and there is no online ranking.
       if (route === "leaderboard") return json({ entries: [] });
       return json({ error: "offline route not available" }, 404);
     }
@@ -70,6 +72,14 @@
       .account-rank,.rank-track,.rank-note { display:none !important; }
     `;
     document.head.appendChild(style);
+
+    // These nodes have already been bound by game.js by DOMContentLoaded time.
+    // Remove all user-facing leaderboard entry points/overlay so ranking does
+    // not exist as a usable feature in the Android build.
+    for (const id of ["rankingBtn", "introRanking", "resultRanking", "rankingOverlay"]) {
+      document.getElementById(id)?.remove();
+    }
+
     const nameNote = document.querySelector(".pilotLabel span");
     if (nameNote) nameNote.textContent = "端末内にのみ保存";
 
