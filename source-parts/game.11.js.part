@@ -1,0 +1,200 @@
+  }
+  garageBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openGarage();
+  });
+  garageClose.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeGarage();
+  });
+  garageOverlay.addEventListener("pointerdown", (e) => {
+    if (e.target === garageOverlay) closeGarage();
+  });
+  historyBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openHistory();
+  });
+  viewResultsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openHistory();
+  });
+  historyClose.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeHistory();
+  });
+  historyOverlay.addEventListener("pointerdown", (e) => {
+    if (e.target === historyOverlay) closeHistory();
+  });
+  async function api(path, options = {}) {
+    const r = await fetch(apiURL(path), {
+      ...options,
+      signal: AbortSignal.timeout(15000),
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      const e = new Error(j.error || "通信に失敗しました");
+      e.status = r.status;
+      throw e;
+    }
+    return j;
+  }
+  let identityQueue = Promise.resolve(),
+    memoryPlayer = storage.getItem("codug-player-v1") || "";
+  async function issueRunToken(epoch) {
+    const name = runName;
+    let issuedToken = "";
+    const issue = async () => {
+      const player = storage.getItem("codug-player-v1") || memoryPlayer;
+      const j = await api("run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ player: player || undefined, name }),
+      });
+      if (j.player) {
+        memoryPlayer = j.player;
+        storage.setItem("codug-player-v1", j.player);
+      }
+      if (typeof j.run !== "string" || !j.run)
+        throw new Error("開始トークンを取得できませんでした");
+      issuedToken = j.run;
+      if (epoch === generation) {
+        runToken = j.run;
+        refreshProfile();
+        runIssueError = "";
+      }
+      return j.run;
+    };
+    const task = () =>
+      navigator.locks
+        ? navigator.locks.request("codug-player-identity", issue)
+        : issue();
+    const attempt = async () => {
+      try {
+        return await task();
+      } catch (e) {
+        if (e.status && e.status < 500) throw e;
+        return task();
+      }
+    };
+    const pending = identityQueue.then(attempt, attempt);
+    identityQueue = pending.catch(() => {});
+    try {
+      await pending;
+      if (epoch === generation) showToast("オンライン接続済み // 掘削開始");
+      return issuedToken;
+    } catch (e) {
+      if (epoch === generation) {
+        runIssueError = e.message || "開始トークンの取得に失敗しました";
+        showToast("オンライン登録なしの練習プレイ");
+      }
+      return "";
+    } finally {
+      if (epoch === generation) {
+        sessionStarting = false;
+        syncPause();
+      }
+    }
+  }
+  async function sealResult(result) {
+    if (resultPromise) return resultPromise;
+    const epoch = generation,
+      pendingRun = runPromise,
+      name = runName;
+    $("submissionStatus").textContent = "ランキングに登録中…";
+    $("submitRetry").hidden = true;
+    resultPromise = (async () => {
+      try {
+        const token = await pendingRun;
+        if (!token)
+          throw new Error(
+            runIssueError ||
+              "開始トークンなし：この記録は端末に保存しました。再プレイで接続を確認できます",
+          );
+        const j = await api("result", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            run: token,
+            depth: result.depth,
+            points: result.points,
+            name,
+          }),
+        });
+        if (epoch !== generation) return null;
+        shareToken = j.token;
+        lastSavedId = j.id;
+        refreshProfile();
+        $("submissionStatus").textContent =
+          "✓ 記録保存済み · 自己ベストのみランキングに掲載";
+        return j.token;
+      } catch (e) {
+        if (epoch === generation) {
+          $("submissionStatus").textContent = e.message;
+          $("submitRetry").hidden = !runToken;
+        }
+        return null;
+      } finally {
+        if (epoch === generation) resultPromise = null;
+      }
+    })();
+    return resultPromise;
+  }
+  function shareURL(token) {
+    const u = new URL(location.origin + location.pathname);
+    u.searchParams.set("r2", token);
+    return u.toString();
+  }
+  async function shareResult() {
+    let token = shareToken;
+    if (!token) {
+      showToast("結果を署名中…");
+      token = await sealResult({
+        depth: Math.floor(depth),
+        points: Math.floor(runPoints),
+      });
+    }
+    if (!token) {
+      showToast(
+        $("submissionStatus").textContent || "記録を保存できませんでした",
+      );
+      return;
+    }
+    const url = shareURL(token),
+      text = `⛏ CO-DUG: ${Math.floor(depth).toLocaleString()}m / ${Math.floor(runPoints).toLocaleString()}pt`;
+    try {
+      if (navigator.share)
+        await navigator.share({ title: "CO-DUG result", text, url });
+      else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(`${text}\n${url}`);
+        showToast("記録リンクをコピーした");
+      } else prompt("共有リンク", url);
+    } catch (e) {
+      if (e && e.name !== "AbortError") showToast("共有できなかった");
+    }
+  }
+  shareBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    shareResult();
+  });
+  async function checkShared() {
+    const q = new URLSearchParams(location.search),
+      raw = q.get("r2") || q.get("r"),
+      legacy = q.get("result");
+    if (!raw && !legacy) return;
+    sharedOverlay.classList.remove("hidden");
+    paused = true;
+    if (legacy && !raw) {
+      sharedDepth.textContent = "INVALID";
+      sharedPoints.textContent = "UNSIGNED";
+      showToast("未署名の共有URL");
+      return;
+    }
+    try {
+      const r = await fetch(
+          q.has("r2")
+            ? apiURL(`result?token=${encodeURIComponent(raw)}`)
+            : `/api/result?token=${encodeURIComponent(raw)}`,
+          { signal: AbortSignal.timeout(12000) },
+        ),
+        j = await r.json();
+      if (!r.ok || !j.valid) throw 0;
