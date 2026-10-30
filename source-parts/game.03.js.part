@@ -1,0 +1,200 @@
+      color: "#ff65df",
+      fill: "#2f1530",
+      damage: 2,
+    },
+    iron: {
+      kind: "ore",
+      name: "IRON ORE",
+      color: "#9ba6b2",
+      core: "#d9e1e8",
+      value: 50,
+    },
+    copper: {
+      kind: "ore",
+      name: "COPPER ORE",
+      color: "#d77c52",
+      core: "#ffb17e",
+      value: 75,
+    },
+    silver: {
+      kind: "ore",
+      name: "SILVER ORE",
+      color: "#ccd8e4",
+      core: "#ffffff",
+      value: 110,
+    },
+    gold: {
+      kind: "ore",
+      name: "GOLD ORE",
+      color: "#f4c542",
+      core: "#fff0a3",
+      value: 165,
+    },
+    amethyst: {
+      kind: "ore",
+      name: "AMETHYST",
+      color: "#c07cff",
+      core: "#efd5ff",
+      value: 235,
+    },
+    infernite: {
+      kind: "ore",
+      name: "INFERNITE",
+      color: "#ff5e47",
+      core: "#ffd0a8",
+      value: 330,
+    },
+    voidCrystal: {
+      kind: "ore",
+      name: "VOID CRYSTAL",
+      color: "#54f7e8",
+      core: "#d8fffb",
+      value: 470,
+    },
+    errorShard: {
+      kind: "ore",
+      name: "ERROR SHARD",
+      color: "#ff62dc",
+      core: "#ffe0fa",
+      value: 680,
+    },
+    repair: {
+      kind: "item",
+      name: "REPAIR KIT",
+      icon: "✚",
+      color: "#67e8a5",
+      effect: "repair",
+    },
+    battery: {
+      kind: "item",
+      name: "DRILL CELL",
+      icon: "⚡",
+      color: "#ffd166",
+      effect: "battery",
+    },
+    shield: {
+      kind: "item",
+      name: "IMPACT SHIELD",
+      icon: "◇",
+      color: "#64d8ff",
+      effect: "shield",
+    },
+    cache: {
+      kind: "item",
+      name: "SALVAGE CACHE",
+      icon: "★",
+      color: "#ffb86b",
+      effect: "cache",
+    },
+    prototype: {
+      kind: "item",
+      name: "PROTOTYPE BIT",
+      icon: "▲",
+      color: "#d28cff",
+      effect: "prototype",
+    },
+  };
+  const garageDefs = [
+    {
+      k: "x",
+      icon: "🛡️",
+      name: "強化フレーム",
+      desc: "開始BODY +1",
+      max: 5,
+      base: 1200,
+    },
+    {
+      k: "cool",
+      icon: "❄️",
+      name: "永久冷却系",
+      desc: "冷却速度UP / 発熱DOWN",
+      max: 5,
+      base: 1500,
+    },
+    {
+      k: "mag",
+      icon: "🧲",
+      name: "永久磁石",
+      desc: "開始時からポイント磁石",
+      max: 2,
+      base: 2600,
+    },
+    {
+      k: "ore",
+      icon: "💎",
+      name: "鉱石鑑定AI",
+      desc: "鉱石価値 +8% / LV",
+      max: 5,
+      base: 1900,
+    },
+  ];
+  function garageCost(g) {
+    return Math.floor(g.base * Math.pow(1.85, garage[g.k]));
+  }
+  function applyGarage() {
+    maxHp = hp = 3 + garage.x;
+    heatCoolRate += garage.cool * 0.07;
+    heatGain = Math.max(B.minHeatGain, heatGain - garage.cool * 0.025);
+    pointMagnet = Math.max(pointMagnet, garage.mag);
+    oreMultiplier *= 1 + garage.ore * 0.08;
+  }
+  function renderGarage() {
+    garageBank.textContent = `BANK ${Math.floor(totalPoints).toLocaleString()} pt`;
+    garageList.innerHTML = "";
+    garageDefs.forEach((g) => {
+      const lv = garage[g.k],
+        maxed = lv >= g.max,
+        cost = garageCost(g),
+        b = document.createElement("button");
+      b.className = "choice";
+      b.style.width = "100%";
+      b.innerHTML = `<div class="icon">${g.icon}</div><h3>${g.name} LV.${lv}/${g.max}</h3><p>${g.desc}</p><em>${maxed ? "MAX" : cost.toLocaleString() + " pt"}</em>`;
+      b.disabled = maxed;
+      b.style.opacity = maxed ? ".55" : "1";
+      b.onclick = () => {
+        if (maxed) return;
+        if (totalPoints < cost) {
+          showToast("BANKが足りない");
+          return;
+        }
+        bank(-cost);
+        garage[g.k]++;
+        saveGarage();
+        renderGarage();
+        showToast(`${g.name} LV.${garage[g.k]}`);
+      };
+      garageList.appendChild(b);
+    });
+  }
+  function openGarage() {
+    renderGarage();
+    garageOverlay.classList.remove("hidden");
+    paused = true;
+  }
+  function closeGarage() {
+    garageOverlay.classList.add("hidden");
+    if (started && !gameover && upgradeOverlay.classList.contains("hidden"))
+      paused = false;
+  }
+  const upgrades = [
+    {
+      icon: "⚙️",
+      name: "高トルクモーター",
+      available: () => drillDuration < B.maxDuration,
+      desc: "ドリル時間 +0.1秒（最大0.9秒）。",
+      tag: "DURATION +",
+      apply() {
+        drillDuration = Math.min(B.maxDuration, drillDuration + 0.1);
+        drillLv++;
+      },
+    },
+    {
+      icon: "🔁",
+      name: "高速クラッチ",
+      available: () => drillCooldownMax > B.minCooldown,
+      desc: "ドリル再使用までの待ち時間を短縮。",
+      tag: "COOLDOWN -",
+      apply() {
+        drillCooldownMax = Math.max(B.minCooldown, drillCooldownMax - 0.04);
+        drillLv++;
+      },
