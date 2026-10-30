@@ -1,0 +1,200 @@
+    },
+    {
+      icon: "❄️",
+      name: "冷却フィン",
+      available: () => heatCoolRate < B.maxCoolRate || heatGain > B.minHeatGain,
+      desc: "ドリルの熱を早く逃がし、オーバーヒートしにくくする。",
+      tag: "COOLING +",
+      apply() {
+        heatCoolRate = Math.min(B.maxCoolRate, heatCoolRate + 0.06);
+        heatGain = Math.max(B.minHeatGain, heatGain - 0.025);
+        drillLv++;
+      },
+    },
+    {
+      icon: "🔩",
+      name: "ロングビット",
+      available: () => tipReach < B.maxTipReach,
+      desc: "ドリル先端の破壊判定を少し前へ延長。",
+      tag: "TIP RANGE +",
+      apply() {
+        tipReach = Math.min(B.maxTipReach, tipReach + 8);
+        drillLv++;
+      },
+    },
+    {
+      icon: "💎",
+      name: "鉱石粉砕ヘッド",
+      available: () => oreMultiplier < B.maxOreMultiplier,
+      desc: "鉱石倍率 +0.25（最大3.5倍）。",
+      tag: "ORE MULT +0.25",
+      apply() {
+        oreMultiplier = Math.min(B.maxOreMultiplier, oreMultiplier + 0.25);
+        drillLv++;
+      },
+    },
+    {
+      icon: "🛡️",
+      name: "増設フレーム",
+      available: () => maxHp < B.maxHp,
+      desc: "最大耐久 +1、耐久を1回復。",
+      tag: "BODY +1",
+      apply() {
+        maxHp = Math.min(B.maxHp, maxHp + 1);
+        hp = Math.min(maxHp, hp + 1);
+      },
+    },
+    {
+      icon: "🧲",
+      name: "ポイント磁石",
+      available: () => pointMagnet < 2,
+      desc: "隣レーンの黄色ポイントも回収できる。",
+      tag: "POINT MAGNET",
+      apply() {
+        pointMagnet = Math.min(2, pointMagnet + 1);
+      },
+    },
+    {
+      icon: "🧰",
+      name: "現地修理",
+      available: () => hp < maxHp,
+      desc: "耐久を全回復する。",
+      tag: "FULL REPAIR",
+      apply() {
+        hp = maxHp;
+      },
+    },
+  ];
+  function num(v) {
+    v = Number(v);
+    return Number.isFinite(v) ? v : 0;
+  }
+  function readHistory() {
+    try {
+      const x = JSON.parse(storage.getItem(STORE.history) || "[]");
+      return Array.isArray(x)
+        ? x
+            .filter(
+              (r) => r && Number.isFinite(r.depth) && Number.isFinite(r.points),
+            )
+            .slice(0, 20)
+        : [];
+    } catch {
+      return [];
+    }
+  }
+  function readGarage() {
+    try {
+      const x = JSON.parse(storage.getItem(STORE.garage) || "{}");
+      return {
+        x: clamp(Math.floor(num(x?.x)), 0, 5),
+        cool: clamp(Math.floor(num(x?.cool)), 0, 5),
+        mag: clamp(Math.floor(num(x?.mag)), 0, 2),
+        ore: clamp(Math.floor(num(x?.ore)), 0, 5),
+      };
+    } catch {
+      return { x: 0, cool: 0, mag: 0, ore: 0 };
+    }
+  }
+  function saveGarage() {
+    storage.setItem(STORE.garage, JSON.stringify(garage));
+  }
+  function bank(v) {
+    totalPoints = Math.max(0, Math.floor(totalPoints + v));
+    storage.setItem(STORE.total, String(totalPoints));
+  }
+  function resize() {
+    DPR = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth;
+    H = innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  addEventListener("resize", resize);
+  resize();
+  function layerIndexFor(d) {
+    let idx = 0;
+    for (let i = 0; i < layers.length; i++) if (d >= layers[i].at) idx = i;
+    return idx;
+  }
+  function layerFor(d) {
+    return layers[layerIndexFor(d)];
+  }
+  function clamp(v, a, b) {
+    return Math.max(a, Math.min(b, v));
+  }
+  function seeded(n) {
+    const x = Math.sin(n * 12.9898 + runSeed * 0.00001) * 43758.5453;
+    return x - Math.floor(x);
+  }
+  function playerY() {
+    return H * PLAYER_RATIO;
+  }
+  function heatStage() {
+    return drillHeat < 0.22
+      ? 0
+      : drillHeat < 0.48
+        ? 1
+        : drillHeat < 0.72
+          ? 2
+          : 3;
+  }
+  function heatColor() {
+    return ["#67e8a5", "#ffd166", "#ff9f43", "#ff596d"][heatStage()];
+  }
+  function heatName() {
+    return ["GREEN", "YELLOW", "ORANGE", "RED"][heatStage()];
+  }
+  function heatCooldown() {
+    return drillCooldownMax * B.cooldownFactor(heatStage());
+  }
+  function breakDrill() {
+    if (gameover) return;
+    thermalFailure = true;
+    drill = 0;
+    drillCooldown = 99;
+    modeBox.classList.remove("drilling");
+    showToast("OVERHEAT // DRILL BROKEN");
+    shake = 18;
+    if (navigator.vibrate) navigator.vibrate([90, 45, 160]);
+    finishRun();
+  }
+  function drillTipY() {
+    return playerY() + 67 + tipReach;
+  }
+  function field() {
+    const width = Math.min(W * 0.88, 480);
+    return { left: (W - width) / 2, width };
+  }
+  function laneX(l) {
+    const f = field();
+    return f.left + (f.width * (l + 0.5)) / 3;
+  }
+  function rowY(r) {
+    return playerY() + (r.depth - depth) * 3.25;
+  }
+  function showToast(t) {
+    toast.textContent = t;
+    toast.classList.add("show");
+    clearTimeout(showToast.t);
+    showToast.t = setTimeout(() => toast.classList.remove("show"), 1150);
+  }
+  function rollMission() {
+    const phase = (missionLevel - 1) % 3;
+    if (phase === 0)
+      mission = {
+        kind: "ore",
+        label: "鉱石を砕く",
+        target: 5 + missionLevel * 2,
+        progress: 0,
+        reward: 180 + missionLevel * 70,
+      };
+    else if (phase === 1)
+      mission = {
+        kind: "rock",
+        label: "岩を砕く",
+        target: 6 + missionLevel * 2,
+        progress: 0,
+        reward: 220 + missionLevel * 75,
+      };
