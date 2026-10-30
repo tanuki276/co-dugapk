@@ -1,0 +1,200 @@
+        icon: "◇",
+        name: "補給パック",
+        desc: "全冷却し、シールドを1枚補充。満タンならBANK +300。",
+        tag: "RESUPPLY",
+        apply() {
+          drillHeat = 0;
+          drillCooldown = 0;
+          if (shieldCharges < 2) shieldCharges++;
+          else bank(300);
+        },
+      });
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    pool.length = Math.min(3, pool.length);
+    upgradeChoices.innerHTML = "";
+    pool.forEach((u) => {
+      const b = document.createElement("button");
+      b.className = "choice";
+      b.innerHTML = `<div class="icon">${u.icon}</div><h3>${u.name}</h3><p>${u.desc}</p><em>${u.tag}</em>`;
+      b.onclick = () => {
+        u.apply();
+        upgradeOverlay.classList.add("hidden");
+        paused = false;
+        showToast(`${u.icon} ${u.name}`);
+      };
+      upgradeChoices.appendChild(b);
+    });
+    upgradeOverlay.classList.remove("hidden");
+  }
+  function finishRun() {
+    if (gameover) return;
+    gameover = true;
+    recordJournal("runs");
+    recordJournal("depth", depth);
+    paused = true;
+    drill = 0;
+    const reason = $("gameoverReason");
+    if (reason)
+      reason.textContent = thermalFailure
+        ? "ドリルがオーバーヒートで焼損しました。赤の先は停止です。"
+        : "岩石への接触回数が保証規定を超えました。";
+    modeBox.classList.remove("drilling");
+    bestDepth = Math.max(bestDepth, Math.floor(depth));
+    bestPoints = Math.max(bestPoints, Math.floor(runPoints));
+    storage.setItem(STORE.bestDepth, String(bestDepth));
+    storage.setItem(STORE.bestPoints, String(bestPoints));
+    const result = {
+      depth: Math.floor(depth),
+      points: Math.floor(runPoints),
+      at: Date.now(),
+    };
+    lastResult = result;
+    sealResult(result);
+    history.unshift(result);
+    history = history.slice(0, 20);
+    storage.setItem(STORE.history, JSON.stringify(history));
+    finalDepth.textContent = `${result.depth.toLocaleString()}m`;
+    finalPoints.textContent = result.points.toLocaleString();
+    gameoverOverlay.classList.remove("hidden");
+    if (navigator.vibrate) navigator.vibrate([80, 60, 120]);
+  }
+  function update(dt) {
+    syncPause();
+    if (paused || gameover || !started) return;
+    const event = E.tick(expedition, dt);
+    if (event === 'start') showToast('RUSH! 20秒以内に●5個 · 被弾で失敗');
+    if (event === 'expired') showToast('RUSH終了 · 次のチャンスを狙おう');
+    moveCooldown = Math.max(0, moveCooldown - dt);
+    ensureRows();
+    const speed = B.speed(depth);
+    depth += speed * dt;
+    if (Math.floor(depth / 100) > journalDepth) {
+      journalDepth = Math.floor(depth / 100);
+      recordJournal('depth', depth);
+      if (!runDamaged) recordJournal('cleanDepth', depth);
+    }
+    visualLane += (currentLane - visualLane) * Math.min(1, dt * 13);
+    if (comboTimer > 0) {
+      comboTimer = Math.max(0, comboTimer - dt);
+      if (comboTimer === 0) { combo = 1; expedition.chain = 0; }
+    }
+    if (drill > 0) {
+      drill -= dt;
+      drillHeat = Math.min(
+        1.05,
+        drillHeat + dt * heatGain * (1 + heatStage() * 0.14),
+      );
+      const hs = heatStage();
+      if (hs > lastHeatStage) {
+        lastHeatStage = hs;
+        showToast(`DRILL HEAT // ${heatName()}`);
+        if (navigator.vibrate && hs >= 2) navigator.vibrate(hs === 3 ? 28 : 16);
+      }
+      if (drillHeat >= 1) {
+        breakDrill();
+        return;
+      }
+      if (drill <= 0) {
+        drill = 0;
+        drillCooldown = Math.max(drillCooldown, heatCooldown());
+        modeBox.classList.remove("drilling");
+      }
+    } else {
+      const coolFactor = B.coolingFactor(heatStage(), drillCooldown > 0);
+      drillHeat = Math.max(0, drillHeat - dt * heatCoolRate * coolFactor);
+      lastHeatStage = heatStage();
+    }
+    if (drillCooldown > 0) drillCooldown = Math.max(0, drillCooldown - dt);
+    if (hitFlash > 0) hitFlash -= dt;
+    const tipY = drillTipY(),
+      bodyY = playerY();
+    for (const row of rows) {
+      const y = rowY(row);
+      for (let l = 0; l < 3; l++) {
+        if (gameover) return;
+        const id = row.cells[l];
+        if (!id || row.resolved[l]) continue;
+        const t = TYPES[id],
+          laneDist = Math.abs(l - currentLane);
+        if (t.kind === "point") {
+          if (
+            (laneDist === 0 || laneDist <= pointMagnet) &&
+            Math.abs(y - bodyY) < 18
+          ) {
+            row.resolved[l] = true;
+            missionHit("point");
+            collectPoint(t.value, laneX(l), y, t.color);
+          } else if (y < bodyY - 28) row.resolved[l] = true;
+          continue;
+        }
+        if (t.kind === "item") {
+          if (l === currentLane && Math.abs(y - bodyY) < 18)
+            bodyResolve(row, l, id);
+          else if (y < bodyY - 28) row.resolved[l] = true;
+          continue;
+        }
+        if (l !== currentLane) {
+          if (y < bodyY - 25) row.resolved[l] = true;
+          continue;
+        }
+        if (drill > 0 && y <= tipY + 15 && y >= tipY - 24) {
+          drillDestroy(row, l, id);
+          continue;
+        }
+        if (Math.abs(y - bodyY) <= BODY_HIT) bodyResolve(row, l, id);
+        else if (y < bodyY - BODY_HIT - 8) row.resolved[l] = true;
+      }
+    }
+    maybeUpgrade();
+    const li = layerIndexFor(depth);
+    if (li !== lastLayerIndex) {
+      lastLayerIndex = li;
+      layerBannerName.textContent = layers[li].name;
+      layerBanner.classList.add("show");
+      clearTimeout(layerBanner.t);
+      layerBanner.t = setTimeout(
+        () => layerBanner.classList.remove("show"),
+        1800,
+      );
+      showToast(`DEPTH ZONE: ${layers[li].name}`);
+    }
+  }
+  function drawDecor(layer) {
+    const f = field(),
+      left = f.left,
+      right = f.left + f.width,
+      t = performance.now() * 0.001;
+    ctx.save();
+    if (layer.decor === "roots") {
+      ctx.strokeStyle = "rgba(80,45,30,.55)";
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i % 2 ? right : left, (((i * 137 - depth * 2) % H) + H) % H);
+        ctx.quadraticCurveTo(
+          W / 2,
+          (i * 137 + 70 - depth * 2) % H,
+          i % 2 ? right - 30 : left + 30,
+          (i * 137 + 130 - depth * 2) % H,
+        );
+        ctx.stroke();
+      }
+    } else if (layer.decor === "fossils") {
+      ctx.strokeStyle = "rgba(255,220,190,.18)";
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 7; i++) {
+        const y = (((i * 121 - depth * 3) % H) + H) % H,
+          x = i % 2 ? right + 28 : left - 28;
+        ctx.beginPath();
+        ctx.arc(x, y, 12, 0, Math.PI * 1.5);
+        ctx.stroke();
+      }
+    } else if (layer.decor === "cracks") {
+      ctx.strokeStyle = "rgba(230,230,240,.12)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 10; i++) {
+        const y = (((i * 89 - depth * 4) % H) + H) % H,
+          x = i % 2 ? right + 12 : left - 12;
