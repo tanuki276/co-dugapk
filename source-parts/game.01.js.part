@@ -1,0 +1,200 @@
+(() => {
+  const B = globalThis.CODUG_BALANCE;
+  const E = globalThis.CODUG_EXPEDITION;
+  let expedition = E.fresh(), accountPoints = null, profileRequest = 0;
+  function renderRank() {
+    const r = E.rank(accountPoints || 0);
+    const text = accountPoints === null ? 'ランク未同期 · オンライン記録で成長' :
+      `R${r.tier + 1} ${r.name} · ${accountPoints.toLocaleString()} XP${r.next ? ` / 次まで ${(r.next - accountPoints).toLocaleString()}` : ' · MAX'}`;
+    for (const id of ['accountRank', 'introRank', 'resultRank']) {
+      const el = document.getElementById(id);
+      if (el) { el.textContent = text; el.style.setProperty('--rank-color', r.color); }
+    }
+    document.getElementById('rankProgress').style.width = `${r.progress * 100}%`;
+  }
+  async function refreshProfile() {
+    const player = storage.getItem('codug-player-v1') || memoryPlayer;
+    if (!player) { renderRank(); return; }
+    const request = ++profileRequest;
+    try {
+      const j = await api('profile', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({player}) });
+      if (request !== profileRequest) return;
+      const before = E.rank(accountPoints || 0);
+      accountPoints = j.points;
+      renderRank();
+      if (E.rank(accountPoints).tier > before.tier && before.tier >= 0 && started) showToast(`RANK UP! ${E.rank(accountPoints).name}`);
+    } catch { if (request === profileRequest) { document.getElementById('accountRank').textContent = 'ランク同期待ち · 次の接続時に再取得'; } }
+  }
+  function apiURL(path) {
+    const [route, query = ""] = path.split("?");
+    const u = new URL("/api/codug", location.origin);
+    u.search = new URLSearchParams(query);
+    u.searchParams.set("route", route);
+    return u.toString();
+  }
+  // Quota / private mode must not prevent playing.
+  const storage = {
+    getItem(k) {
+      try {
+        return localStorage.getItem(k);
+      } catch {
+        return null;
+      }
+    },
+    setItem(k, v) {
+      try {
+        localStorage.setItem(k, v);
+      } catch {}
+    },
+  };
+  const J = globalThis.CODUG_JOURNAL;
+  let journalRaw;
+  try { journalRaw = JSON.parse(storage.getItem('codug-journal-v1') || '{}'); } catch {}
+  const journal = J.fresh(journalRaw);
+  let runDamaged = false, journalDepth = 0, journalReturnFocus = null;
+  function recordJournal(event, value = 1) {
+    J.record(journal, event, value);
+    const earned = J.unlock(journal);
+    storage.setItem('codug-journal-v1', JSON.stringify(journal));
+    if (earned.length) {
+      const notice = $('achievementNotice');
+      notice.textContent = `実績解除：${earned.map(a => a.title).join(' / ')}`;
+      notice.classList.add('show');
+      clearTimeout(recordJournal.timer);
+      recordJournal.timer = setTimeout(() => notice.classList.remove('show'), 4500);
+    }
+  }
+  function renderJournal() {
+    const achievements = $('journalTab').value === 'achievements';
+    const filter = $('journalFilter').value;
+    $('journalFilter').parentElement.hidden = achievements;
+    $('journalSummary').textContent = achievements
+      ? `実績 ${Object.keys(journal.unlocked).length} / ${J.achievements.length} 解除`
+      : `発見 ${J.discovered(journal)} / 16種類 · 累計 ${J.total(journal).toLocaleString()}個`;
+    const list = $('journalList'); list.replaceChildren();
+    if (achievements) {
+      for (const a of J.achievements) {
+        const earned = journal.unlocked[a.id], progress = Math.min(a.target, a.get(journal));
+        const card = document.createElement('article'); card.className = 'journal-entry achievement' + (earned ? ' unlocked' : '');
+        const title = document.createElement('h3'); title.textContent = `${earned ? '★' : '◇'} ${a.title}`;
+        const desc = document.createElement('p'); desc.textContent = a.description;
+        const status = document.createElement('small'); status.textContent = earned
+          ? `解除済み · ${new Date(earned).toLocaleDateString('ja-JP')}` : `${progress.toLocaleString()} / ${a.target.toLocaleString()}`;
+        const bar = document.createElement('progress'); bar.max = a.target; bar.value = progress; bar.setAttribute('aria-label', a.title);
+        card.append(title, desc, status, bar); list.append(card);
+      }
+    } else {
+      for (const [id, [name, kind]] of Object.entries(J.minerals)) {
+        if (filter !== 'all' && filter !== kind) continue;
+        const count = journal.counts[id], t = TYPES[id];
+        const card = document.createElement('article'); card.className = 'journal-entry' + (count ? ' discovered' : ' undiscovered');
+        const icon = document.createElement('span'); icon.className = `specimen ${kind}`; icon.style.setProperty('--mineral',count ? t.color : '#57616b'); icon.textContent = count ? (kind === 'ore' ? '◆' : '⬟') : '?';
+        const title = document.createElement('h3'); title.textContent = count ? name : '未発見';
+        const desc = document.createElement('p'); desc.textContent = count ? t.name : (kind === 'ore' ? '未知の鉱石' : '未知の石');
+        const amount = document.createElement('strong'); amount.textContent = `${count.toLocaleString()} 個`;
+        card.append(icon,title,desc,amount); list.append(card);
+      }
+    }
+  }
+  function openJournal(tab = 'minerals') {
+    journalReturnFocus = document.activeElement;
+    $('journalTab').value = tab; renderJournal();
+    $('journalOverlay').classList.remove('hidden'); syncPause(); $('journalClose').focus();
+  }
+  function closeJournal() {
+    $('journalOverlay').classList.add('hidden'); syncPause();
+    (journalReturnFocus || canvas).focus();
+  }
+  let generation = 0,
+    runPromise = Promise.resolve(""),
+    resultPromise = null,
+    lastResult = null,
+    runName = "採掘者",
+    lastSavedId = "",
+    manualPause = false,
+    sessionStarting = false,
+    runIssueError = "";
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const $ = (id) => document.getElementById(id),
+    canvas = $("game"),
+    ctx = canvas.getContext("2d");
+  const depthEl = $("depth"),
+    runPointsEl = $("runPoints"),
+    totalPointsEl = $("totalPoints"),
+    drillLevelEl = $("drillLevel"),
+    hpBar = $("hpBar"),
+    hpText = $("hpText"),
+    drillBar = $("drillBar"),
+    drillText = $("drillText"),
+    modeBox = $("modeBox"),
+    modeText = $("modeText"),
+    layerText = $("layerText"),
+    toast = $("toast"),
+    layerBanner = $("layerBanner"),
+    layerBannerName = $("layerBannerName");
+  const intro = $("intro"),
+    startBtn = $("startBtn"),
+    upgradeOverlay = $("upgradeOverlay"),
+    upgradeChoices = $("upgradeChoices"),
+    gameoverOverlay = $("gameoverOverlay"),
+    finalDepth = $("finalDepth"),
+    finalPoints = $("finalPoints"),
+    retryBtn = $("retryBtn"),
+    shareBtn = $("shareBtn"),
+    viewResultsBtn = $("viewResultsBtn"),
+    historyBtn = $("historyBtn"),
+    historyOverlay = $("historyOverlay"),
+    historyClose = $("historyClose"),
+    historyList = $("historyList"),
+    historySummary = $("historySummary"),
+    garageBtn = $("garageBtn"),
+    garageOverlay = $("garageOverlay"),
+    garageClose = $("garageClose"),
+    garageList = $("garageList"),
+    garageBank = $("garageBank"),
+    missionText = $("missionText"),
+    sharedOverlay = $("sharedOverlay"),
+    sharedClose = $("sharedClose"),
+    sharedDepth = $("sharedDepth"),
+    sharedPoints = $("sharedPoints"),
+    challengeBtn = $("challengeBtn");
+  const STORE = {
+    total: "codug3-total-points",
+    bestDepth: "codug3-best-depth",
+    bestPoints: "codug3-best-points",
+    history: "codug3-history",
+    garage: "codug4-garage",
+  };
+  let totalPoints = num(storage.getItem(STORE.total)),
+    bestDepth = num(storage.getItem(STORE.bestDepth)),
+    bestPoints = num(storage.getItem(STORE.bestPoints)),
+    history = readHistory(),
+    garage = readGarage();
+  let runToken = "",
+    shareToken = "",
+    combo = 1,
+    comboTimer = 0,
+    missionLevel = 1,
+    mission = null,
+    research = 0,
+    researchLevel = 0;
+  let W = 0,
+    H = 0,
+    DPR = 1,
+    last = 0,
+    started = false,
+    gameover = false,
+    paused = true,
+    depth = 0,
+    runPoints = 0,
+    hp = 3,
+    maxHp = 3,
+    currentLane = 1,
+    moveCooldown = 0,
+    visualLane = 1,
+    drill = 0,
+    drillCooldown = 0,
+    shake = 0,
+    hitFlash = 0,
+    lastGenerated = -1,
