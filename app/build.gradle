@@ -1,0 +1,53 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.tanuki276.codug'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.tanuki276.codug'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main.assets.srcDirs += layout.buildDirectory.dir('generated/codugAssets')
+    }
+}
+
+// The original game file is kept in line-range parts so the private source can
+// be mirrored without introducing any server dependency. Build recreates it byte-for-line.
+tasks.register('assembleGameAsset') {
+    def inputDir = rootProject.file('source-parts')
+    def outputDir = layout.buildDirectory.dir('generated/codugAssets')
+    inputs.dir(inputDir)
+    outputs.dir(outputDir)
+    doLast {
+        def dir = outputDir.get().asFile
+        dir.mkdirs()
+        def out = new File(dir, 'game.js')
+        out.setText('', 'UTF-8')
+        inputDir.listFiles()
+            .findAll { it.name.startsWith('game.') && it.name.endsWith('.js.part') }
+            .sort { a, b -> a.name <=> b.name }
+            .each { part -> out.append(part.getText('UTF-8'), 'UTF-8') }
+    }
+}
+
+tasks.named('preBuild').configure { dependsOn tasks.named('assembleGameAsset') }
