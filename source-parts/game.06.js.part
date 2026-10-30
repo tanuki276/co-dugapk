@@ -1,0 +1,200 @@
+    pointMagnet = 0;
+    drillLv = 1;
+    tipReach = 0;
+    drillHeat = 0;
+    overheated = false;
+    overheatLock = 0;
+    heatGain = B.heatGain;
+    heatCoolRate = B.coolRate;
+    thermalFailure = false;
+    lastHeatStage = 0;
+    combo = 1;
+    comboTimer = 0;
+    missionLevel = 1;
+    research = 0;
+    researchLevel = 0;
+    rollMission();
+    shareToken = "";
+    runToken = "";
+    applyGarage();
+    sessionStarting = true;
+    runIssueError = "";
+    showToast("オンライン接続を確認中…");
+    runPromise = issueRunToken(generation);
+    seen.clear();
+    ["rock", "iron", "point"].forEach((x) => seen.add(x));
+    gameoverOverlay.classList.add("hidden");
+    upgradeOverlay.classList.add("hidden");
+  }
+  function moveOrDrill(lane) {
+    syncPause();
+    if (paused || gameover) return;
+    if (lane === currentLane) activateDrill();
+    else moveLane(lane);
+  }
+  function moveLane(target) {
+    syncPause();
+    if (paused || gameover || moveCooldown > 0) return;
+    const next = B.stepLane(currentLane, target);
+    if (next === currentLane) return;
+    currentLane = next;
+    moveCooldown = B.moveDelay;
+    showToast(`LANE ${currentLane + 1}`);
+  }
+  function activateDrill() {
+    syncPause();
+    if (paused || gameover) return;
+    if (drill > 0) {
+      drill = 0;
+      drillCooldown = heatCooldown();
+      modeBox.classList.remove("drilling");
+      return;
+    }
+    if (drillCooldown > 0) return;
+    drillHeat = Math.min(1.05, drillHeat + B.activationHeat(drillHeat));
+    if (drillHeat >= 1) {
+      breakDrill();
+      return;
+    }
+    drill = drillDuration;
+    shake = Math.max(shake, 2);
+    modeBox.classList.add("drilling");
+  }
+  function damage(id, x, y) {
+    const t = TYPES[id];
+    announce(id);
+    if (shieldCharges > 0) {
+      shieldCharges--;
+      recordJournal("blocks");
+      shake = 8;
+      burst(x, y, "#64d8ff", 16);
+      floater("BLOCK", x, y - 16, "#64d8ff");
+      showToast("IMPACT SHIELD 消費");
+      return;
+    }
+    if (E.hit(expedition)) showToast('RUSH失敗 · 次のチャンスを狙おう');
+    runDamaged = true;
+    const dmg = t.damage || 1;
+    hp -= dmg;
+    combo = 1;
+    comboTimer = 0;
+    shake = 13;
+    hitFlash = 0.28;
+    burst(x, y, "#ff596d", 19);
+    floater(`-${dmg}`, x, y - 15, "#ff596d");
+    if (navigator.vibrate) navigator.vibrate(45);
+    showToast(`${t.name} に激突`);
+    if (hp <= 0) finishRun();
+  }
+  function collectPoint(value, x, y, color = "#ffd166") {
+    value = Math.round(value * (expedition.fever > 0 ? 2 : 1));
+    runPoints += value;
+    recordJournal("score", runPoints);
+    bank(value);
+    burst(x, y, color, 10);
+    floater(`+${Math.round(value)}`, x, y - 12, color);
+  }
+  function collectItem(id, x, y) {
+    recordJournal("items");
+    const t = TYPES[id];
+    announce(id);
+    if (t.effect === "repair") {
+      if (hp < maxHp) {
+        hp++;
+        floater("BODY +1", x, y - 18, t.color);
+        showToast("REPAIR KIT // +1 BODY");
+      } else {
+        collectPoint(50, x, y, t.color);
+        showToast("BODY満タン // KITを50ptに換金");
+      }
+    } else if (t.effect === "battery") {
+      drillCooldown = 0;
+      drillHeat = Math.max(0, drillHeat - 0.48);
+      lastHeatStage = heatStage();
+      drill = 0;
+      modeBox.classList.remove("drilling");
+      floater("COOLED", x, y - 18, t.color);
+      showToast("DRILL CELL // 冷却・即時再使用");
+    } else if (t.effect === "shield") {
+      shieldCharges = Math.min(2, shieldCharges + 1);
+      floater("SHIELD +1", x, y - 18, t.color);
+      showToast(`IMPACT SHIELD x${shieldCharges}`);
+    } else if (t.effect === "cache") {
+      const value = 180 + Math.floor(depth / 1000) * 25;
+      collectPoint(value, x, y, t.color);
+      showToast(`SALVAGE CACHE // +${value}pt`);
+    } else if (t.effect === "prototype") {
+      drillDuration = Math.min(B.maxDuration, drillDuration + 0.05);
+      tipReach = Math.min(34, tipReach + 3);
+      drillLv++;
+      floater("DRILL +", x, y - 18, t.color);
+      showToast("PROTOTYPE BIT // ドリル微強化");
+    }
+    burst(x, y, t.color, 16);
+  }
+  function drillDestroy(row, lane, id) {
+    if (row.resolved[lane]) return;
+    recordJournal(id);
+    row.resolved[lane] = true;
+    const t = TYPES[id],
+      x = laneX(lane),
+      y = rowY(row);
+    announce(id);
+    if (t.kind === "rock") {
+      if (comboTimer > 0) comboTimer = Math.max(comboTimer, 2);
+      missionHit("rock");
+      burst(x, y, t.color, 15);
+      floater(t.name, x, y - 12, t.color);
+      shake = t.damage > 1 ? 8 : 5;
+    } else if (t.kind === "ore") {
+      missionHit("ore");
+      if (E.ore(expedition, comboTimer > 0)) {
+        recordJournal("fever");
+        drillHeat = Math.max(0, drillHeat - 0.35);
+        showToast('FEVER! 8秒間 ポイント2倍 · 冷却ボーナス');
+      }
+      combo = comboTimer > 0 ? Math.min(18, combo + 1) : 1;
+      comboTimer = B.comboWindow(depth);
+      recordJournal("combo", combo);
+      const mult = 1 + Math.min(2, (combo - 1) * 0.12),
+        value = B.oreValue(t.value, oreMultiplier, combo);
+      research++;
+      drillHeat = Math.max(0, drillHeat - 0.06);
+      lastHeatStage = heatStage();
+      collectPoint(value, x, y, t.color);
+      burst(x, y, t.color, 18);
+      floater(
+        `${t.name} +${value}${combo > 1 ? " x" + mult.toFixed(1) : ""}`,
+        x,
+        y - 24,
+        t.color,
+      );
+      shake = 6;
+    }
+  }
+  function bodyResolve(row, lane, id) {
+    if (row.resolved[lane]) return;
+    row.resolved[lane] = true;
+    const t = TYPES[id],
+      x = laneX(lane),
+      y = rowY(row);
+    if (t.kind === "point") {
+      missionHit("point");
+      collectPoint(t.value, x, y, t.color);
+    } else if (t.kind === "item") collectItem(id, x, y);
+    else damage(id, x, y);
+  }
+  function maybeUpgrade() {
+    const researchReady = research >= B.researchTarget(researchLevel);
+    if ((!researchReady && depth < nextUpgrade) || paused || gameover) return;
+    if (researchReady) {
+      research -= B.researchTarget(researchLevel);
+      researchLevel++;
+    } else nextUpgrade += 500;
+    $("upgradeSource").textContent = researchReady
+      ? "鉱石研究が完成！ 追加の改造を1つ選択。"
+      : "深度ボーナス！ 改造を1つ選択。";
+    paused = true;
+    const pool = upgrades.filter((u) => !u.available || u.available());
+    if (!pool.length)
+      pool.push({
