@@ -1,0 +1,5 @@
+      overlay.querySelector("h1,h2")?.textContent || "ゲームメニュー",
+    );
+  }
+})();
+
