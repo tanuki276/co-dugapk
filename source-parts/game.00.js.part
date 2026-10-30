@@ -1,0 +1,73 @@
+// Compatibility layer for older Android WebViews used by virtual Android environments.
+(() => {
+  const canvasProto = globalThis.CanvasRenderingContext2D?.prototype;
+  if (canvasProto && typeof canvasProto.roundRect !== "function") {
+    canvasProto.roundRect = function (x, y, width, height, radii = 0) {
+      const raw = Array.isArray(radii) ? radii[0] : radii;
+      const radius = Math.max(0, Math.min(Math.abs(Number(raw) || 0), Math.abs(width) / 2, Math.abs(height) / 2));
+      const right = x + width;
+      const bottom = y + height;
+      this.moveTo(x + radius, y);
+      this.lineTo(right - radius, y);
+      this.quadraticCurveTo(right, y, right, y + radius);
+      this.lineTo(right, bottom - radius);
+      this.quadraticCurveTo(right, bottom, right - radius, bottom);
+      this.lineTo(x + radius, bottom);
+      this.quadraticCurveTo(x, bottom, x, bottom - radius);
+      this.lineTo(x, y + radius);
+      this.quadraticCurveTo(x, y, x + radius, y);
+      this.closePath();
+      return this;
+    };
+  }
+
+  if (globalThis.AbortSignal && typeof AbortSignal.timeout !== "function") {
+    AbortSignal.timeout = function (milliseconds) {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), Math.max(0, Number(milliseconds) || 0));
+      return controller.signal;
+    };
+  }
+
+  function ancestorWithClass(node, className) {
+    while (node && node !== document) {
+      if (node.classList?.contains(className)) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  function closeOverlayFromEvent(event) {
+    const closeButton = ancestorWithClass(event.target, "closeX");
+    if (!closeButton) return;
+    const overlay = ancestorWithClass(closeButton, "overlay");
+    if (!overlay) return;
+    event.preventDefault();
+    event.stopPropagation();
+    overlay.classList.add("hidden");
+    closeButton.blur?.();
+  }
+
+  document.addEventListener("touchend", closeOverlayFromEvent, { capture: true, passive: false });
+  document.addEventListener("pointerup", closeOverlayFromEvent, true);
+  document.addEventListener("click", closeOverlayFromEvent, true);
+
+  const installStyle = () => {
+    const style = document.createElement("style");
+    style.textContent = `
+      .closeX {
+        position: relative !important;
+        z-index: 1000 !important;
+        pointer-events: auto !important;
+        touch-action: manipulation !important;
+        min-width: 52px !important;
+        min-height: 52px !important;
+      }
+      .overlay:not(.hidden) { pointer-events: auto !important; }
+      .overlay:not(.hidden) .card { pointer-events: auto !important; }
+    `;
+    document.head.appendChild(style);
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", installStyle, { once: true });
+  else installStyle();
+})();
