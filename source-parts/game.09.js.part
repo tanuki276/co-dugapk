@@ -1,0 +1,200 @@
+      ctx.strokeStyle = t.color;
+      ctx.beginPath();
+      ctx.moveTo(-14, -11);
+      ctx.lineTo(2, 1);
+      ctx.lineTo(15, -14);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+  }
+  function drawOre(id) {
+    const t = TYPES[id];
+    ctx.fillStyle = t.color;
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = t.color;
+    ctx.beginPath();
+    ctx.moveTo(0, -25);
+    ctx.lineTo(21, -8);
+    ctx.lineTo(14, 24);
+    ctx.lineTo(-18, 20);
+    ctx.lineTo(-24, -5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = t.core;
+    ctx.globalAlpha = 0.75;
+    ctx.beginPath();
+    ctx.moveTo(-5, -13);
+    ctx.lineTo(7, -7);
+    ctx.lineTo(3, 8);
+    ctx.lineTo(-9, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  function drawItem(id) {
+    const t = TYPES[id];
+    ctx.fillStyle = t.color;
+    ctx.globalAlpha = 0.14;
+    ctx.beginPath();
+    ctx.arc(0, 0, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = t.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 18, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = t.color;
+    ctx.font = "900 18px ui-monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(t.icon, 0, 1);
+    ctx.textBaseline = "alphabetic";
+  }
+  function drawRows() {
+    const f = field(),
+      cellW = f.width / 3;
+    for (const row of rows) {
+      const y = rowY(row);
+      if (y < -45 || y > H + 80) continue;
+      for (let l = 0; l < 3; l++) {
+        if (row.resolved[l]) continue;
+        const id = row.cells[l];
+        if (!id) continue;
+        const t = TYPES[id],
+          x = laneX(l);
+        ctx.save();
+        ctx.translate(x, y);
+        if (t.kind === "rock") drawRock(id, cellW);
+        else if (t.kind === "ore") drawOre(id);
+        else if (t.kind === "item") drawItem(id);
+        else {
+          ctx.fillStyle = t.color;
+          ctx.shadowBlur = 18;
+          ctx.shadowColor = t.color;
+          ctx.beginPath();
+          ctx.arc(0, 0, 11, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = "rgba(255,255,255,.65)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, 16, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
+  }
+  function drawTapCells() {
+    const f = field(),
+      cellW = f.width / 3,
+      y = playerY() - 44;
+    for (let l = 0; l < 3; l++) {
+      ctx.fillStyle =
+        l === currentLane
+          ? drill > 0
+            ? "rgba(255,209,102,.15)"
+            : "rgba(255,255,255,.055)"
+          : "rgba(255,255,255,.022)";
+      ctx.fillRect(f.left + l * cellW + 3, y, cellW - 6, 108);
+      ctx.strokeStyle =
+        l === currentLane ? "rgba(255,209,102,.34)" : "rgba(255,255,255,.055)";
+      ctx.strokeRect(f.left + l * cellW + 3, y, cellW - 6, 108);
+    }
+  }
+  function drawDrill() {
+    const x = laneX(visualLane),
+      y = playerY(),
+      thermalGlow = heatColor();
+    ctx.save();
+    ctx.translate(x, y);
+    if (drill > 0) {
+      ctx.fillStyle =
+        heatStage() === 0
+          ? "rgba(103,232,165,.12)"
+          : heatStage() === 1
+            ? "rgba(255,209,102,.12)"
+            : heatStage() === 2
+              ? "rgba(255,159,67,.14)"
+              : "rgba(255,89,109,.18)";
+      ctx.beginPath();
+      ctx.arc(0, 34, 50 + Math.random() * 5 + tipReach * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = thermalGlow;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 34, 37 + tipReach * 0.22, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (shieldCharges > 0) {
+      ctx.strokeStyle = "rgba(100,216,255,.65)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 8, 44, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    const tier = Math.min(3, Math.floor((drillLv - 1) / 2));
+    const metal = ['#d7a36d', '#a5d0e3', '#8cded3', '#bca1ff'][tier];
+    // Twin tracked pods; upgraded rigs gain fins and a luminous reactor.
+    for (const side of [-1, 1]) {
+      ctx.fillStyle = '#101923'; ctx.strokeStyle = metal; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(side * 33 - 7, -29, 14, 46, 5); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#506477';
+      for (let j = 0; j < 5; j++) ctx.fillRect(side * 33 - 5, -24 + j * 8, 10, 3);
+      if (tier > 0) { ctx.fillStyle = metal; ctx.beginPath(); ctx.moveTo(side*30,-30); ctx.lineTo(side*(41+tier*3),-45); ctx.lineTo(side*38,-7); ctx.fill(); }
+    }
+    const hull = ctx.createLinearGradient(-28, -30, 28, 16);
+    hull.addColorStop(0, '#263e50'); hull.addColorStop(.45, '#547083'); hull.addColorStop(1, '#16232f');
+    ctx.fillStyle = hull;
+    ctx.strokeStyle = hitFlash > 0 ? "#ff596d" : "#f7f2e8";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(-30, -38, 60, 55, 14);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = expedition.fever > 0 ? "#b89aff" : metal;
+    ctx.shadowColor = thermalGlow;
+    ctx.shadowBlur = 9 + heatStage() * 5;
+    ctx.fillRect(-20, -27, 40, 13);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#171218";
+    ctx.font = "900 9px ui-monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("CO-DUG", 0, -17);
+    ctx.fillStyle = '#0a1724'; ctx.fillRect(-18, -7, 36, 16);
+    ctx.fillStyle = expedition.fever > 0 ? '#b89aff' : thermalGlow;
+    ctx.beginPath(); ctx.arc(0, 1, 5 + tier, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = metal;
+    for (const bx of [-23, 23]) { ctx.fillRect(bx-2,-32,4,4); ctx.fillRect(bx-2,8,4,4); }
+    ctx.strokeStyle = metal;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-16, 15);
+    ctx.lineTo(-10, 28);
+    ctx.moveTo(16, 15);
+    ctx.lineTo(10, 28);
+    ctx.stroke();
+    ctx.fillStyle = drill > 0 ? thermalGlow : "#d8d2dc";
+    ctx.beginPath();
+    ctx.moveTo(-16, 25);
+    ctx.lineTo(16, 25);
+    ctx.lineTo(0, 67 + tipReach);
+    ctx.closePath();
+    ctx.fill();
+    // Helical flutes rotate only during drilling; geometric art stays crisp at any DPR.
+    ctx.save(); ctx.clip();
+    const phase = drill > 0 && !reducedMotion && !paused ? (performance.now() / 45) % 12 : 0;
+    ctx.strokeStyle = '#506477'; ctx.lineWidth = 3;
+    for (let j = -1; j < 8; j++) { ctx.beginPath(); ctx.moveTo(-20,25+j*12+phase); ctx.lineTo(20,37+j*12+phase); ctx.stroke(); }
+    ctx.restore();
+    if (drill > 0) {
+      ctx.strokeStyle = thermalGlow;
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(-20 + i * 20, 69 + tipReach);
+        ctx.lineTo(-27 + i * 27, 88 + tipReach + Math.random() * 9);
+        ctx.stroke();
+      }
