@@ -1,0 +1,200 @@
+    }
+    ctx.restore();
+  }
+  function drawFx() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx / 60;
+      p.y += p.vy / 60;
+      p.vy += 4;
+      p.a -= 0.033;
+      ctx.globalAlpha = Math.max(0, p.a);
+      ctx.fillStyle = p.c;
+      ctx.fillRect(p.x, p.y, p.s, p.s);
+      if (p.a <= 0) particles.splice(i, 1);
+    }
+    ctx.globalAlpha = 1;
+    ctx.font = "900 10px ui-monospace";
+    ctx.textAlign = "center";
+    for (let i = floaters.length - 1; i >= 0; i--) {
+      const q = floaters[i];
+      q.y += q.vy / 60;
+      q.a -= 0.025;
+      ctx.globalAlpha = Math.max(0, q.a);
+      ctx.fillStyle = q.c;
+      ctx.fillText(q.t, q.x, q.y);
+      if (q.a <= 0) floaters.splice(i, 1);
+    }
+    ctx.globalAlpha = 1;
+  }
+  function drawDepthMarks() {
+    const f = field(),
+      start = Math.floor(depth / 100) * 100;
+    ctx.fillStyle = "rgba(255,255,255,.18)";
+    ctx.font = "8px ui-monospace";
+    ctx.textAlign = "left";
+    for (let d = start; d < start + 300; d += 100) {
+      const y = playerY() + (d - depth) * 3.25;
+      if (y > -10 && y < H + 10) ctx.fillText(`${d}m`, f.left + 5, y);
+    }
+  }
+  function render() {
+    if (reducedMotion) shake = 0;
+    const layer = layerFor(depth),
+      sx = (Math.random() - 0.5) * shake,
+      sy = (Math.random() - 0.5) * shake;
+    shake *= 0.83;
+    ctx.save();
+    ctx.translate(sx, sy);
+    drawBackground(layer);
+    drawDepthMarks();
+    drawRows();
+    drawTapCells();
+    drawDrill();
+    drawFx();
+    if (hitFlash > 0) {
+      ctx.fillStyle = `rgba(255,89,109,${hitFlash * 0.35})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.restore();
+    depthEl.textContent = `${Math.floor(depth).toLocaleString()}m`;
+    runPointsEl.textContent = Math.floor(runPoints).toLocaleString();
+    totalPointsEl.textContent = Math.floor(totalPoints).toLocaleString();
+    drillLevelEl.textContent = drillLv;
+    hpBar.style.width = `${(hp / maxHp) * 100}%`;
+    hpText.textContent = `${Math.max(0, hp)}/${maxHp}`;
+    const ready = drillCooldown <= 0 && drill <= 0;
+    drillBar.style.width = `${Math.max(5, clamp(drillHeat, 0, 1) * 100)}%`;
+    drillBar.style.background = heatColor();
+    drillText.textContent =
+      drill > 0
+        ? `${heatName()} ${Math.round(drillHeat * 100)}%`
+        : drillCooldown > 0
+          ? `${heatName()} ${drillCooldown.toFixed(1)}s`
+          : `${heatName()} READY`;
+    modeText.textContent = sessionStarting
+      ? "CONNECTING"
+      : drill > 0
+        ? "DRILL"
+        : drillCooldown > 0
+          ? "COOLING"
+          : "MOVE";
+    layerText.textContent = `${layer.name} ${Math.floor(depth)}m${shieldCharges ? ` · S${shieldCharges}` : ""}${combo > 1 ? ` · x${(1 + Math.min(2, (combo - 1) * 0.12)).toFixed(1)}` : ""}`;
+    $('rushText').textContent = expedition.fever > 0
+      ? `FEVER ×2 · ${expedition.fever.toFixed(1)}s`
+      : expedition.remaining > 0
+        ? `RUSH ${expedition.progress}/${expedition.target} · ${Math.ceil(expedition.remaining)}秒 · 被弾で失敗`
+        : `鉱石4連続でFEVER · ${expedition.chain}/4`;
+    $('rushText').classList.toggle('active', expedition.fever > 0 || expedition.remaining > 0);
+    const nextRow = Math.max(0, Math.ceil((depth - 90) / ROW_GAP));
+    const encounter = B.encounter(nextRow, runSeed);
+    $("researchText").textContent = `💎 研究 ${research}/${B.researchTarget(researchLevel)} · 採掘で追加改造`;
+    const upcomingBarrier = rows.some((row) => row.barrier && row.depth > depth && row.depth - depth < 100);
+    $("encounterText").textContent = upcomingBarrier ? "⚠ 岩盤接近 · 冷却してドリルで突破！" : encounter
+      ? { vein: "💎 鉱脈帯 · 鉱石を追って連続採掘", slalom: "↔ スラローム · ポイントの道へ", supply: "✚ 補給帯 · 冷却と修理のチャンス" }[encounter.kind]
+      : "探索中 · 鉱石は価値1.8倍＋熱を6%回収";
+    missionText.textContent = mission
+      ? `${mission.label} ${mission.progress}/${mission.target} +${mission.reward}`
+      : "MISSION —";
+  }
+  function loop(t) {
+    const dt = Math.min(0.034, (t - last) / 1000 || 0);
+    last = t;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+  function laneFromX(x) {
+    const f = field();
+    if (x < f.left) return 0;
+    if (x > f.left + f.width) return 2;
+    return clamp(Math.floor((x - f.left) / (f.width / 3)), 0, 2);
+  }
+  canvas.addEventListener(
+    "pointerdown",
+    (e) => {
+      e.preventDefault();
+      syncPause();
+      if (!started) {
+        if (!document.querySelector(".overlay:not(.hidden)")) start();
+        return;
+      }
+      if (paused || gameover) return;
+      moveOrDrill(laneFromX(e.clientX));
+    },
+    { passive: false },
+  );
+  addEventListener("keydown", (e) => {
+    if (
+      e.repeat ||
+      (e.target.closest("input,select,textarea,button") &&
+        !e.target.closest(".hidden"))
+    )
+      return;
+    if (e.code === 'Escape' && !$('journalOverlay').classList.contains('hidden')) {
+      e.preventDefault(); closeJournal(); return;
+    }
+    if (e.code === "Escape" || e.code === "KeyP") {
+      e.preventDefault();
+      togglePause();
+      return;
+    }
+    if (e.code === "ArrowLeft" || e.code === "KeyA") {
+      e.preventDefault();
+      moveLane(currentLane - 1);
+    } else if (e.code === "ArrowRight" || e.code === "KeyD") {
+      e.preventDefault();
+      moveLane(currentLane + 1);
+    } else if (e.code === "Space" || e.code === "ArrowDown") {
+      e.preventDefault();
+      if (!started) {
+        if (
+          !$("intro").classList.contains("hidden") &&
+          !document.querySelector(".overlay:not(.hidden):not(#intro)")
+        )
+          start();
+      } else activateDrill();
+    }
+  });
+  startBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    start();
+    canvas.focus();
+  });
+  retryBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    resetRun();
+    started = true;
+    paused = false;
+    canvas.focus();
+  });
+  function renderHistory() {
+    historySummary.textContent = `累計 ${Math.floor(totalPoints).toLocaleString()} pts / 最深 ${bestDepth.toLocaleString()}m / 最高 ${bestPoints.toLocaleString()} pts`;
+    historyList.innerHTML = "";
+    if (!history.length) {
+      historyList.innerHTML =
+        '<div class="empty">まだ記録なし。地下へどうぞ。</div>';
+      return;
+    }
+    history.forEach((r, i) => {
+      const d = document.createElement("div");
+      d.className = "historyItem";
+      const date = new Date(r.at || Date.now()).toLocaleDateString("ja-JP", {
+        month: "numeric",
+        day: "numeric",
+      });
+      d.innerHTML = `<span>#${String(i + 1).padStart(2, "0")} · ${date}</span><b>${num(r.depth).toLocaleString()}m</b><strong>${num(r.points).toLocaleString()}pt</strong>`;
+      historyList.appendChild(d);
+    });
+  }
+  function openHistory() {
+    renderHistory();
+    historyOverlay.classList.remove("hidden");
+    paused = true;
+  }
+  function closeHistory() {
+    historyOverlay.classList.add("hidden");
+    if (started && !gameover && !upgradeOverlay.classList.contains("hidden"))
+      return;
+    if (started && !gameover) paused = false;
