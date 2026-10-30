@@ -2,6 +2,19 @@
   if (globalThis.__CODUG_OFFLINE__) return;
   globalThis.__CODUG_OFFLINE__ = true;
 
+  // file:// pages expose location.origin as "null". The original web build
+  // constructs API URLs from location.origin, so provide a harmless local base.
+  const NativeURL = globalThis.URL;
+  class OfflineURL extends NativeURL {
+    constructor(url, base) {
+      super(url, base === "null" ? "https://local.codug/" : base);
+    }
+  }
+  OfflineURL.canParse = NativeURL.canParse?.bind(NativeURL);
+  OfflineURL.createObjectURL = NativeURL.createObjectURL?.bind(NativeURL);
+  OfflineURL.revokeObjectURL = NativeURL.revokeObjectURL?.bind(NativeURL);
+  globalThis.URL = OfflineURL;
+
   const json = (value, status = 200) => Promise.resolve(new Response(JSON.stringify(value), {
     status,
     headers: { "content-type": "application/json" },
@@ -23,7 +36,7 @@
     let url;
     try {
       const raw = typeof input === "string" ? input : input.url;
-      url = new URL(raw, location.href);
+      url = new NativeURL(raw, "https://local.codug/");
     } catch {
       return json({ error: "offline only" }, 400);
     }
