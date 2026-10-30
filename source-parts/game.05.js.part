@@ -1,0 +1,200 @@
+    else
+      mission = {
+        kind: "point",
+        label: "ポイントを拾う",
+        target: 7 + missionLevel * 2,
+        progress: 0,
+        reward: 250 + missionLevel * 80,
+      };
+  }
+  function missionHit(kind) {
+    if (kind === 'point') {
+      const reward = E.pickup(expedition);
+      if (reward) { recordJournal("rush"); collectPoint(reward, laneX(currentLane), playerY(), '#71e4df'); showToast(`RUSH CLEAR +${reward}pt${expedition.fever > 0 ? ' ×2' : ''}`); }
+    }
+    if (!mission || mission.kind !== kind) return;
+    mission.progress++;
+    if (mission.progress >= mission.target) {
+      bank(mission.reward);
+      showToast(`MISSION CLEAR +${mission.reward} BANK`);
+      missionLevel++;
+      rollMission();
+    }
+  }
+  function announce(id) {
+    if (seen.has(id)) return;
+    seen.add(id);
+    showToast(`NEW DISCOVERY: ${TYPES[id].name}`);
+  }
+  function burst(x, y, c, n = 12) {
+    for (let i = 0; i < n; i++)
+      particles.push({
+        x,
+        y,
+        vx: (Math.random() - 0.5) * 180,
+        vy: (Math.random() - 0.5) * 150,
+        a: 1,
+        s: 2 + Math.random() * 4,
+        c,
+      });
+  }
+  function floater(t, x, y, c) {
+    floaters.push({ t, x, y, a: 1, c, vy: -24 });
+  }
+  function rockFor(d, r) {
+    if (d < 500) return "rock";
+    if (d < 1200) return r < 0.58 ? "rock" : "shale";
+    if (d < 2200) return r < 0.35 ? "shale" : "granite";
+    if (d < 3600) return r < 0.35 ? "granite" : "basalt";
+    if (d < 5600) return r < 0.3 ? "basalt" : "crystalRock";
+    if (d < 8000) return r < 0.28 ? "basalt" : "magmaRock";
+    if (d < 12000) return r < 0.25 ? "magmaRock" : "voidRock";
+    return r < 0.22 ? "voidRock" : "errorRock";
+  }
+  function oreFor(d, r) {
+    if (d < 500) return "iron";
+    if (d < 1200) return r < 0.55 ? "iron" : "copper";
+    if (d < 2200) return r < 0.28 ? "copper" : "silver";
+    if (d < 3600) return r < 0.38 ? "silver" : "gold";
+    if (d < 5600) return r < 0.35 ? "gold" : "amethyst";
+    if (d < 8000) return r < 0.3 ? "amethyst" : "infernite";
+    if (d < 12000) return r < 0.28 ? "infernite" : "voidCrystal";
+    return r < 0.25 ? "voidCrystal" : "errorShard";
+  }
+  function itemFor(d, r) {
+    if (d < 250) return null;
+    if (d < 1200) return "repair";
+    if (d < 2200) return r < 0.55 ? "repair" : "battery";
+    if (d < 3600) return r < 0.33 ? "repair" : r < 0.68 ? "battery" : "shield";
+    if (d < 5600)
+      return r < 0.22
+        ? "repair"
+        : r < 0.48
+          ? "battery"
+          : r < 0.74
+            ? "shield"
+            : "cache";
+    return r < 0.15
+      ? "repair"
+      : r < 0.34
+        ? "battery"
+        : r < 0.55
+          ? "shield"
+          : r < 0.82
+            ? "cache"
+            : "prototype";
+  }
+  function makeRow(index) {
+    const d = index * ROW_GAP + 90,
+      r = seeded(index * 9 + 1),
+      r2 = seeded(index * 9 + 2),
+      r3 = seeded(index * 9 + 3),
+      r4 = seeded(index * 9 + 4),
+      r5 = seeded(index * 9 + 5),
+      danger = Math.min(0.69, 0.24 + d / 11000),
+      lane = Math.floor(r * 3),
+      cells = [null, null, null];
+    if (r2 < danger) {
+      cells[lane] = r3 < 0.52 ? rockFor(d, r5) : oreFor(d, r5);
+    } else
+      cells[lane] =
+        r3 < 0.58 ? "point" : r3 < 0.84 ? oreFor(d, r5) : rockFor(d, r5);
+    const empty = cells.map((v, i) => (v ? null : i)).filter((v) => v !== null),
+      itemChance = B.itemChance(d);
+    if (empty.length && (r4 < itemChance || (d >= 250 && index % 10 === 9))) {
+      const pick = empty[Math.floor(seeded(index * 9 + 7) * empty.length)];
+      cells[pick] = itemFor(d, seeded(index * 9 + 8));
+    } else if (empty.length && r4 < 0.6) {
+      const pick = empty[Math.floor(seeded(index * 9 + 7) * empty.length)];
+      cells[pick] = "point";
+    }
+    const encounter = B.encounter(index, runSeed);
+    if (encounter) {
+      cells.fill(null);
+      const route = encounter.lane;
+      if (encounter.kind === "vein") {
+        cells[route] = oreFor(d, r5);
+        cells[(route + 1) % 3] = "point";
+      } else if (encounter.kind === "slalom") {
+        cells[route] = "point";
+        cells[(route + 1) % 3] = rockFor(d, r5);
+        if (encounter.offset % 2 === 0) cells[(route + 2) % 3] = oreFor(d, r5);
+      } else {
+        cells[route] = encounter.offset === 2 ? "repair" : encounter.offset === 5 ? "battery" : "point";
+      }
+    }
+    const barrier = B.barrierRow(index, d);
+    if (barrier) {
+      // A readable, breakable wall: dodging alone cannot clear this row.
+      cells.fill(rockFor(d, r5));
+      cells[lane] = oreFor(d, r5);
+    } else if (!encounter && seeded(index * 9 + 101) < B.extraObstacleChance(d)) {
+      // Two hazards still leave one route; never overwrite a supply item.
+      const extra = (lane + 1 + Math.floor(r5 * 2)) % 3;
+      if (!cells[extra] || cells[extra] === "point") cells[extra] = rockFor(d, r3);
+    }
+    return { index, depth: d, cells, barrier, resolved: [false, false, false] };
+  }
+  function ensureRows() {
+    const current = Math.floor(depth / ROW_GAP);
+    for (let i = lastGenerated + 1; i <= current + 21; i++) {
+      rows.push(makeRow(i));
+      lastGenerated = i;
+    }
+    while (rows.length && rows[0].depth < depth - 95) rows.shift();
+  }
+  function start() {
+    if (started && !gameover) {
+      paused = false;
+      intro.classList.add("hidden");
+      return;
+    }
+    resetRun();
+    started = true;
+    paused = false;
+    intro.classList.add("hidden");
+    showToast(sessionStarting ? "オンライン接続を確認中…" : "掘削開始");
+  }
+  function resetRun() {
+    generation++;
+    expedition = E.fresh();
+    runDamaged = false; journalDepth = 0;
+    resultPromise = null;
+    lastResult = null;
+    lastSavedId = "";
+    manualPause = false;
+    runName =
+      Array.from(
+        $("pilotName")
+          .value.trim()
+          .normalize("NFKC")
+          .replace(/[\p{C}<>]/gu, ""),
+      )
+        .slice(0, 20)
+        .join("") || "採掘者";
+    storage.setItem("codug-name", runName);
+    $("submissionStatus").textContent = "";
+    $("submitRetry").hidden = true;
+    depth = 0;
+    runPoints = 0;
+    hp = maxHp = 3;
+    currentLane = 1;
+    moveCooldown = 0;
+    visualLane = 1;
+    drill = 0;
+    drillCooldown = 0;
+    shake = 0;
+    hitFlash = 0;
+    lastGenerated = -1;
+    rows.length = 0;
+    particles.length = 0;
+    floaters.length = 0;
+    gameover = false;
+    paused = true;
+    runSeed = (Math.random() * 1e9) | 0;
+    nextUpgrade = 500;
+    lastLayerIndex = 0;
+    shieldCharges = 0;
+    drillDuration = B.duration;
+    drillCooldownMax = B.cooldown;
+    oreMultiplier = 1;
