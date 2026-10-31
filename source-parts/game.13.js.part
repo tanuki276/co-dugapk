@@ -12,6 +12,7 @@
         paused,
         gameover,
         depth,
+        speed: B.speed(depth),
         hp,
         maxHp,
         currentLane,
