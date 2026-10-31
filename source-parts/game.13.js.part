@@ -1,5 +1,71 @@
       overlay.querySelector("h1,h2")?.textContent || "ゲームメニュー",
     );
   }
+
+  // Small, explicit automation surface for local testing / autoplay.
+  // Keeping this API narrow means external helpers do not need to reach into
+  // the rest of the game closure or synthesize Android touch events.
+  globalThis.CODUG_AUTOMATION = Object.freeze({
+    snapshot() {
+      return {
+        started,
+        paused,
+        gameover,
+        depth,
+        hp,
+        maxHp,
+        currentLane,
+        moveCooldown,
+        drillActive: drill > 0,
+        drillCooldown,
+        drillHeat,
+        shieldCharges,
+        upgradeOpen: !upgradeOverlay.classList.contains("hidden"),
+        rows: rows
+          .filter((row) => row.depth >= depth - 10 && row.depth <= depth + 180)
+          .slice(0, 8)
+          .map((row) => ({
+            index: row.index,
+            depth: row.depth,
+            distance: row.depth - depth,
+            barrier: Boolean(row.barrier),
+            cells: row.cells.map((id, lane) => {
+              if (!id || row.resolved[lane]) return null;
+              const type = TYPES[id];
+              return {
+                id,
+                kind: type?.kind || "unknown",
+                effect: type?.effect || null,
+                value: Number(type?.value) || 0,
+                damage: Number(type?.damage) || 0,
+              };
+            }),
+          })),
+      };
+    },
+    start() {
+      start();
+      canvas.focus();
+    },
+    retry() {
+      resetRun();
+      started = true;
+      paused = false;
+      canvas.focus();
+    },
+    moveTo(lane) {
+      moveLane(clamp(Math.round(Number(lane) || 0), 0, 2));
+    },
+    drill() {
+      activateDrill();
+    },
+    chooseUpgrade(index = 0) {
+      const choices = [...upgradeChoices.querySelectorAll("button.choice")];
+      if (!choices.length) return false;
+      const safeIndex = clamp(Math.floor(Number(index) || 0), 0, choices.length - 1);
+      choices[safeIndex].click();
+      return true;
+    },
+  });
 })();
 
