@@ -1,5 +1,139 @@
       overlay.querySelector("h1,h2")?.textContent || "ゲームメニュー",
     );
   }
+
+  // Local-only controller API for the companion COSC app. This stays inside the
+  // WebView process and exposes gameplay state, not storage or network data.
+  function automationCell(id) {
+    if (!id) return null;
+    const t = TYPES[id];
+    if (!t) return null;
+    return {
+      id,
+      kind: t.kind || "",
+      damage: t.damage || 0,
+      effect: t.effect || "",
+      value: t.value || 0,
+    };
+  }
+
+  function automationState() {
+    const upcoming = [];
+    for (const row of rows) {
+      const distance = row.depth - depth;
+      if (distance < -8) continue;
+      const cells = row.cells.map((id, lane) =>
+        row.resolved[lane] ? null : automationCell(id),
+      );
+      if (!cells.some(Boolean)) continue;
+      upcoming.push({
+        distance,
+        barrier: !!row.barrier,
+        cells,
+      });
+      if (upcoming.length >= 12) break;
+    }
+    return {
+      version: 2,
+      started,
+      paused,
+      manualPause,
+      gameover,
+      sessionStarting,
+      thermalFailure,
+      introVisible: !intro.classList.contains("hidden"),
+      upgradeVisible: !upgradeOverlay.classList.contains("hidden"),
+      gameoverVisible: !gameoverOverlay.classList.contains("hidden"),
+      currentLane,
+      depth,
+      speed: B.speed(depth),
+      accelerator: B.acceleratorFactor(),
+      hp,
+      maxHp,
+      shieldCharges,
+      moveCooldown,
+      drill,
+      drillCooldown,
+      drillHeat,
+      tipReach,
+      drillReady: drill <= 0 && drillCooldown <= 0,
+      combo,
+      research,
+      upcoming,
+    };
+  }
+
+  function automationUpgrade() {
+    if (upgradeOverlay.classList.contains("hidden")) return false;
+    const choices = [...upgradeChoices.querySelectorAll("button.choice")];
+    if (!choices.length) return false;
+    const pick = (text) => choices.find((b) => b.textContent.includes(text));
+    let chosen = null;
+    if (hp < maxHp) chosen = pick("現地修理");
+    if (!chosen && drillHeat > 0.45) chosen = pick("補給パック");
+    chosen ||= pick("冷却フィン");
+    chosen ||= pick("増設フレーム");
+    chosen ||= pick("ロングビット");
+    chosen ||= pick("高速クラッチ");
+    chosen ||= pick("高トルクモーター");
+    chosen ||= pick("ポイント磁石");
+    chosen ||= pick("鉱石粉砕ヘッド");
+    chosen ||= pick("補給パック");
+    chosen ||= choices[0];
+    chosen.click();
+    return true;
+  }
+
+  function automationAction(action) {
+    switch (action) {
+      case "safe-mode":
+        B.setAccelerator(false);
+        return true;
+      case "start":
+        if (!started || gameover) start();
+        else {
+          intro.classList.add("hidden");
+          manualPause = false;
+          paused = false;
+          syncPause();
+        }
+        canvas.focus();
+        return true;
+      case "resume":
+        manualPause = false;
+        $("pauseOverlay").classList.add("hidden");
+        syncPause();
+        canvas.focus();
+        return true;
+      case "left":
+        moveLane(currentLane - 1);
+        return true;
+      case "right":
+        moveLane(currentLane + 1);
+        return true;
+      case "drill":
+        activateDrill();
+        return true;
+      case "upgrade":
+        return automationUpgrade();
+      case "retry":
+        resetRun();
+        started = true;
+        paused = false;
+        manualPause = false;
+        intro.classList.add("hidden");
+        gameoverOverlay.classList.add("hidden");
+        syncPause();
+        canvas.focus();
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  globalThis.CODUG_AUTOMATION = Object.freeze({
+    state: automationState,
+    action: automationAction,
+  });
 })();
 
