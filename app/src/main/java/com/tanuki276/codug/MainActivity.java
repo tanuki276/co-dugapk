@@ -1,6 +1,10 @@
 package com.tanuki276.codug;
 
 import android.app.Activity;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Bundle;
 import android.view.View;
 import android.webkit.WebResourceRequest;
@@ -12,7 +16,20 @@ import android.webkit.WebViewClient;
 import java.io.ByteArrayInputStream;
 
 public final class MainActivity extends Activity {
+    public static final String ACTION_CONTROL = "com.tanuki276.codug.COSC_CONTROL";
+    public static final String EXTRA_ACTION = "action";
     private WebView webView;
+
+    private final BroadcastReceiver controller = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (webView == null || !ACTION_CONTROL.equals(intent.getAction())) return;
+            String action = intent.getStringExtra(EXTRA_ACTION);
+            if (action == null || !action.matches("start|resume|left|right|drill|upgrade|retry|safe-mode")) return;
+            String js = "globalThis.CODUG_AUTOMATION&&globalThis.CODUG_AUTOMATION.action(" + quoteJs(action) + ")";
+            webView.post(() -> webView.evaluateJavascript(js, null));
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,6 +70,11 @@ public final class MainActivity extends Activity {
 
         setContentView(webView);
         webView.loadUrl("file:///android_asset/index.html");
+        registerReceiver(controller, new IntentFilter(ACTION_CONTROL), Context.RECEIVER_EXPORTED);
+    }
+
+    private static String quoteJs(String value) {
+        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'";
     }
 
     private void enterImmersiveMode() {
@@ -87,6 +109,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        try { unregisterReceiver(controller); } catch (Throwable ignored) {}
         if (webView != null) {
             webView.stopLoading();
             webView.destroy();
