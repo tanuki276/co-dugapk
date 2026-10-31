@@ -5,8 +5,10 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -17,19 +19,35 @@ import java.io.ByteArrayInputStream;
 
 public final class MainActivity extends Activity {
     public static final String ACTION_CONTROL = "com.tanuki276.codug.COSC_CONTROL";
+    public static final String ACTION_STATE = "com.tanuki276.cosc.CODUG_STATE";
     public static final String EXTRA_ACTION = "action";
+    public static final String EXTRA_STATE = "state";
     private WebView webView;
+    private volatile String lastState = "";
 
     private final BroadcastReceiver controller = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             if (webView == null || !ACTION_CONTROL.equals(intent.getAction())) return;
             String action = intent.getStringExtra(EXTRA_ACTION);
+            if ("state".equals(action)) {
+                emitState(lastState);
+                return;
+            }
             if (action == null || !action.matches("start|resume|left|right|drill|upgrade|retry|safe-mode")) return;
             String js = "globalThis.CODUG_AUTOMATION&&globalThis.CODUG_AUTOMATION.action(" + quoteJs(action) + ")";
             webView.post(() -> webView.evaluateJavascript(js, null));
         }
     };
+
+    private final class CoscBridge {
+        @JavascriptInterface
+        public void pushState(String json) {
+            if (json == null || json.length() > 64_000) return;
+            lastState = json;
+            emitState(json);
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -46,6 +64,7 @@ public final class MainActivity extends Activity {
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        webView.addJavascriptInterface(new CoscBridge(), "COSCNative");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -70,7 +89,17 @@ public final class MainActivity extends Activity {
 
         setContentView(webView);
         webView.loadUrl("file:///android_asset/index.html");
-        registerReceiver(controller, new IntentFilter(ACTION_CONTROL), Context.RECEIVER_EXPORTED);
+        IntentFilter filter = new IntentFilter(ACTION_CONTROL);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(controller, filter, Context.RECEIVER_EXPORTED);
+        else registerReceiver(controller, filter);
+    }
+
+    private void emitState(String json) {
+        if (json == null || json.isEmpty()) return;
+        Intent out = new Intent(ACTION_STATE)
+                .setPackage("com.tanuki276.cosc")
+                .putExtra(EXTRA_STATE, json);
+        sendBroadcast(out);
     }
 
     private static String quoteJs(String value) {
@@ -111,6 +140,7 @@ public final class MainActivity extends Activity {
     protected void onDestroy() {
         try { unregisterReceiver(controller); } catch (Throwable ignored) {}
         if (webView != null) {
+            webView.removeJavascriptInterface("COSCNative");
             webView.stopLoading();
             webView.destroy();
             webView = null;
